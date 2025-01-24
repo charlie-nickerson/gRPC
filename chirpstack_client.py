@@ -6,17 +6,25 @@ from google.protobuf.json_format import ParseDict
 
 class ChirpStackClient:
     def __init__(self, server_address, api_token):
+        print(f"Token being used: {api_token}")  # Add this line
         self.server_address = server_address
         self.api_token = api_token
         self.base_url = f"http://{server_address.split(':')[0]}:8090"
-        
-        print(f"Initializing connection to {server_address}")
-        
-        # Set up the headers we'll use for REST API calls
         self.headers = {
-            'Authorization': f'Bearer {self.api_token}',
+            'Grpc-Metadata-Authorization': f'Bearer {self.api_token}',
             'Content-Type': 'application/json'
         }
+
+
+    # # Device creation parameters
+    # new_device = {
+    #     "name": "new-device-1",
+    #     "description": "Test LoRaWAN device created via API",
+    #     "dev_eui": "a8610a35392c6606",
+    #     "application_id": config['application_id'],
+    #     "device_profile_id": "34b2ec28-04a4-46cc-b9f5-ff0efc83e4c3"  # Your provided profile ID
+    # }
+
 
     def create_device(self, application_id, device_profile_id, name, dev_eui, description=""):
         """Create a new device using REST API"""
@@ -76,7 +84,77 @@ class ChirpStackClient:
                 "message": f"Failed to delete device: {response.text}",
                 "code": response.status_code
             }
+    
+    def get_device_metrics(self, dev_eui, start_time=None, end_time=None, aggregation=None):
+        # Get metrics for a specific device within a time range.
+        
+        # Args:
+        #     dev_eui (str): Device EUI to get metrics for
+        #     start_time (str, optional): Start time in ISO format (e.g., "2023-01-01T00:00:00Z")
+        #     end_time (str, optional): End time in ISO format (e.g., "2023-12-31T23:59:59Z")
+            
+        # Returns:
+        #     dict: Response containing metrics data or error information
+        try:
+            # Construct base URL
+            url = f"{self.base_url}/api/devices/{dev_eui}/link-metrics"
+            
+            # Add query parameters if time range is specified
+            params = {}
+            if start_time:
+                params['start'] = start_time
+            if end_time:
+                params['end'] = end_time
+            if aggregation:
+                params["aggregation"] = aggregation
+                
+            print(f"\nGetting metrics for device {dev_eui}")
+            print(f"Time range: {start_time} to {end_time}")
+            
+            # Make the request
+            response = requests.get(
+                url,
+                headers=self.headers,
+                params=params
+            )
+            
+            if response.status_code == 200:
+                metrics_data = response.json()
+                return {
+                    "status": "success",
+                    "metrics": metrics_data,
+                    "message": "Metrics retrieved successfully"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Failed to get metrics: {response.text}",
+                    "code": response.status_code
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to get metrics: {str(e)}",
+                "error": str(e)
+            }
 
+    def get_devices(self):
+        url = f"{self.base_url}/api/tenants"  # Try listing tenants first
+        response = requests.get(url, headers=self.headers)
+        print(f"Response: {response.text}")  # Add this to see full response
+        
+        if response.status_code == 200:
+            return {
+                "status": "success",
+                "devices": response.json(),
+                "message": "Devices retrieved successfully"
+            }
+        return {
+            "status": "error",
+            "message": f"Failed to get devices: {response.text}",
+            "code": response.status_code
+        }
 
 
 def load_config(config_file):
@@ -100,17 +178,20 @@ if __name__ == "__main__":
     # Initialize client
     client = ChirpStackClient(config['server_address'], config['api_token'])
     
-    # # Device creation parameters
-    # new_device = {
-    #     "name": "new-device-1",
-    #     "description": "Test LoRaWAN device created via API",
-    #     "dev_eui": "a8610a35392c6606",
-    #     "application_id": config['application_id'],
-    #     "device_profile_id": "34b2ec28-04a4-46cc-b9f5-ff0efc83e4c3"  # Your provided profile ID
-    # }
+
     
-    dev_eui = "a8610a35392c6606"
-    # Create the device
-    print("\nAttempting to delete device...")
-    result = client.delete_device(dev_eui)
-    print("\nDeletion result:", result)
+    channel = grpc.insecure_channel(config['server_address'])
+    client = api.DeviceServiceStub(channel)  # Changed from GatewayServiceStub
+
+    # Set up auth metadata
+    metadata = [("authorization", f"Bearer {config['api_token']}")]
+
+    # Create and send request
+    req = api.ListDevicesRequest()
+    req.application_id = config["application_id"]
+    req.limit = 1000
+
+    resp = client.List(req, metadata=metadata)
+
+    print(resp)
+
